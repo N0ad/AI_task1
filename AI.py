@@ -1,11 +1,35 @@
 import numpy as np
 import cv2
 import keyboard
+import tensorflow as tf
 from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout, Flatten, BatchNormalization, Activation
 from keras.layers.convolutional import Conv2D, MaxPooling2D
 from keras.constraints import maxnorm
 from keras.utils import to_categorical
+from tensorflow.keras import backend as K
+
+
+def custom_f1(y_true, y_pred):
+    def recall_m(y_true, y_pred):
+        TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+        Positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+
+        recall = TP / (Positives+K.epsilon())
+        return recall
+
+
+    def precision_m(y_true, y_pred):
+        TP = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+        Pred_Positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+
+        precision = TP / (Pred_Positives+K.epsilon())
+        return precision
+
+    precision, recall = precision_m(y_true, y_pred), recall_m(y_true, y_pred)
+
+    return 2*((precision*recall)/(precision+recall+K.epsilon()))
+
 np.random.seed(20)
 
 mode = "test"
@@ -60,33 +84,35 @@ if (mode == "teach"):
     model.add(BatchNormalization())
     model.add(Conv2D(64, (3, 3), padding = 'same'))
     model.add(Activation('relu'))
+    model.add(Dropout(0))
     model.add(MaxPooling2D(pool_size = (2, 2)))
     model.add(BatchNormalization())
     model.add(Conv2D(128, (3, 3), padding = 'same'))
     model.add(Activation('relu'))
+    model.add(Dropout(0))
     model.add(MaxPooling2D(pool_size = (2, 2)))
     model.add(BatchNormalization())
     model.add(Conv2D(256, (3, 3), padding = 'same'))
     model.add(Activation('relu'))
+    model.add(Dropout(0))
+    model.add(BatchNormalization())
+    model.add(Conv2D(512, (3, 3), padding = 'same'))
+    model.add(Activation('relu'))
+    model.add(Dropout(0))
     model.add(BatchNormalization())
     model.add(Flatten())
-    model.add(Dense(256, kernel_constraint = maxnorm(3)))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.1))
-    model.add(BatchNormalization())
-    model.add(Dense(128, kernel_constraint = maxnorm(3)))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.1))
+    
     model.add(BatchNormalization())
     model.add(Dense(labels_count))
     model.add(Activation('softmax'))
 
-    model.compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
-    model.fit(x_train, y_train, validation_data = (x_valid, y_valid), epochs = 10, batch_size = 64, validation_split = 1, shuffle = True)
-    model.save('model9.h5')
+    model.compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy', 'mean_squared_error', 'mean_absolute_error', custom_f1])
+    model = load_model('./model10.h5', custom_objects={"custom_f1": custom_f1})
+    model.fit(x_train, y_train, validation_data = (x_valid, y_valid), epochs = 1, batch_size = 64, shuffle = True)
+    model.save('model10.h5')
 
 if (mode == "test"):
-    model = load_model('./model8.h5')
+    model = load_model('./model10.h5', custom_objects={"custom_f1": custom_f1})
 
 def convertPrediction(labels, length):
     max = 0
@@ -147,8 +173,20 @@ for i in range(0, length):
         statistic[real_label][2] = statistic[real_label][2] + 1
         statistic[predict_label][3] = statistic[predict_label][3] + 1
 
+print(model.summary())
+
 scores = model.evaluate(x_test, y_test, verbose = 0)
-print("Accuracy: %.2f%%" % (scores[1] * 100))
+
+print("Loss: ")
+print(scores[0])
+print("Accuracy: ")
+print(scores[1])
+print("MSE: ")
+print(scores[2])
+print("MAE: ")
+print(scores[3])
+print("F1: ")
+print(scores[4])
 
 for i in range(0, labels_count):
     print(labels[i] + ": Total images - " + str(statistic[i][0]) + " | Correctly defined - " + str(statistic[i][1]) + " | Incorrectly defined " + str(statistic[i][2]) + " | Impostors: " + str(statistic[i][3]))
