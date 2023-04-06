@@ -124,8 +124,10 @@ def convertPrediction(labels, length):
     return num
 
 statistic = [[0, 0, 0, 0]]
+TFPN_matrix = [[0 for j in range(labels_count)]]
 for i in range(1, labels_count):
     statistic.append([0, 0, 0, 0])
+    TFPN_matrix.append([0 for j in range(labels_count)])
 
 x_test = []
 y_test = []
@@ -160,20 +162,56 @@ y_test = to_categorical(y_test, num_classes=labels_count)
 length = len(x_test)
 predicts = []
 
+
+def mean_errors(real, pred, leng, num_class):
+    mae = 0
+    mse = 0
+    for i in range(leng):
+        for j in range(num_class):
+            if (real[i][j] == 1):
+                mae = mae + abs(real[i][j] - pred[i][j])
+                mse = mse + (real[i][j] - pred[i][j]) ** 2
+    mae = mae / leng
+    mse = mse / leng
+    return mae, mse
+
+pred = [[]]
+
 for i in range(0, length):
     tst = np.array([x_test[i]])
     res = model.predict(tst, batch_size= 64)
+    pred.append(res[0])
     real_label = convertPrediction(y_test[i], labels_count)
     predict_label = convertPrediction(res[0], labels_count)
     predicts.append(predict_label)
     statistic[real_label][0] = statistic[real_label][0] + 1
     if (real_label == predict_label):
         statistic[real_label][1] = statistic[real_label][1] + 1
+        TFPN_matrix[real_label][real_label] = TFPN_matrix[real_label][real_label] + 1
     else:
         statistic[real_label][2] = statistic[real_label][2] + 1
         statistic[predict_label][3] = statistic[predict_label][3] + 1
+        TFPN_matrix[predict_label][real_label] = TFPN_matrix[predict_label][real_label] + 1
 
-print(model.summary())
+pred = pred[1:]
+MAE, MSE = mean_errors(y_test, pred, length, labels_count)
+
+def f1(matrix, num_class):
+    precision = [0 for i in range(num_class)]
+    recall = [0 for i in range(num_class)]
+    f = [0 for i in range(num_class)]
+    res = 0
+    for i in range(num_class):
+        for j in range(num_class):
+            precision[i] = precision[i] + matrix[i][j]
+            recall[i] = recall[i] + matrix[j][i]
+        precision[i] = matrix[i][i] / precision[i]
+        recall[i] = matrix[i][i] / recall[i]
+        f[i] = (2 * precision[i] * recall[i]) / (precision[i] + recall[i])
+        res = res + f[i]
+    return res / num_class
+
+F = f1(TFPN_matrix, labels_count)
 
 scores = model.evaluate(x_test, y_test, verbose = 0)
 
@@ -187,6 +225,12 @@ print("MAE: ")
 print(scores[3])
 print("F1: ")
 print(scores[4])
+print("Custom MAE: ")
+print(MAE)
+print("Custom MSE: ")
+print(MSE)
+print("Custom F1: ")
+print(F)
 
 for i in range(0, labels_count):
     print(labels[i] + ": Total images - " + str(statistic[i][0]) + " | Correctly defined - " + str(statistic[i][1]) + " | Incorrectly defined " + str(statistic[i][2]) + " | Impostors: " + str(statistic[i][3]))
